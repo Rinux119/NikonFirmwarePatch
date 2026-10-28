@@ -11,6 +11,9 @@ MAX_BYTES = 512 * 1024
 SCREENSHOTS = {
     'docs/images/prores-quality-options.png',
     'docs/images/prores-quality-value.png',
+    'docs/images/pixelshift-groups.png',
+    'docs/images/nraw-quality-tiers.png',
+    'docs/images/opengate-frame-rates.png',
 }
 
 

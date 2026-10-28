@@ -1,8 +1,16 @@
-# Z8PRESTP.BIN：读取、原因码与恢复（公开版 v0.2.0）
+# Z8PRESTP.BIN：读取、原因码与恢复
 
 [中文说明](#这个文件是什么) · [English summary](#english-summary)
 
-**发现停止文件后，先停止继续连拍，等待写入结束，保留文件及相关素材。不要直接删除停止文件后继续长连拍。** 本文依据 v0.2.0 的实际源码核对，原因码说明的是代码走到哪条异常路径，不能单凭它判断卡满、卡速或硬件故障。
+**发现停止文件后，先停止继续连拍，等待写入结束，保留文件及相关素材。不要直接删除停止文件后继续长连拍。** 当前版本仍使用这个停止文件。原因码记录触发停止的路径，不能单凭它判断卡满、卡速或硬件故障。
+
+## 版本适用范围
+
+当前版本与上一公开版 **v0.2.0** 都保留 `Z8PRESTP.BIN`，格式和存在性检查相同。下文正文按当前版本说明。
+
+**当前版本中，数据库拒绝登记或锁失败只尝试 JPEG 回退，不创建停止文件，后续帧仍可尝试 NEF。** 实际 NEF 写入失败、写后找不到文件或超出时间预算，仍可能创建原因码 **3／4／6** 的停止文件。
+
+v0.2.0 在登记拒绝后还会进入直接写临时 NEF 的后备路径。该路径在当前版本中已移除；它特有的原因码 **5** 及 `.NE_` 改名失败见下方“上一公开版的区别”。
 
 ## 这个文件是什么
 
@@ -44,7 +52,7 @@ python3 -c 'import struct,sys;d=open(sys.argv[1],"rb").read();print("size",len(d
 
 把 `E:\Z8PRESTP.BIN` 换成实际位置。若报长度或标识异常，停止按正常格式解释，保留原件和错误输出。不要补零、编辑或重建这个文件来让命令通过。
 
-正常格式的示例值（不是本次故障的诊断结论）：
+正常格式示例（数值仅作演示）：
 
 ```text
 size 32 magic Z8PRESTOP
@@ -69,15 +77,18 @@ PowerShell 将这些字段显示在同一行。
 
 | status | 代码含义 | 如何理解卡上文件 |
 |---|---|---|
-| **3** | 检测到时间预算超限，默认预算为 **1,500,000 微秒** | 原厂 NEF 写入路径是在调用返回后检查：原厂返回成功、最终 NEF 文件名存在，然后发现耗时 ≥ 1.5 秒；该路径不因超时撤销 NEF，但仍须完整解码确认内容。后备 `.NE_` 路径则可能在头／预览写完后、或 RAW 尚未写完时发现超时，留下不完整的 `.NE_`。 |
-| **4** | 原厂 NEF 写入返回错误、段表等内部检查失败，或后备写法的创建／写入／关闭失败 | 原厂路径会撤销或尝试撤销 NEF 登记；不能据此保证实际残留文件都已清除。后备路径可能留下 `.NE_`。JPEG 会按相应路径写入或回退，但不保证成功；检查两卡的 NEF、JPEG 和临时文件。 |
-| **5** | 后备路径的写入和关闭已返回成功，但从 `.NE_` 改名为 `.NEF` 失败 | `.NE_` 可能包含完整内容。保留原件；如需尝试解码，先在备份介质上复制一份再改扩展名，不直接修改证据原件。 |
-| **6** | 原厂返回写入成功，但随后按目标 NEF 路径检查，未确认文件存在 | 这是“返回值与存在性检查不一致”，不单独证明文件丢失的具体原因。必须核查相关目录和两张卡；部分路径仍会按成功返回值取消 JPEG，**不能保证存在替代 JPEG**。 |
-| 其他 | 本版正常的停止文件调用点不写出这些值 | 不强行解释；保留原文件、读取输出、固件版本及相关素材反馈。 |
+| **3** | 原厂 NEF 写入返回成功、最终文件存在，但耗时达到默认 **1,500,000 微秒（1.5 秒）**预算 | 该路径不会因超时撤销已写 NEF；应检查完整文件和解码结果。 |
+| **4** | 原厂 NEF 写入返回错误，或段表等内部检查失败 | 会撤销或尝试撤销 NEF 登记；检查两卡的文件与实际残留，JPEG 回退也可能失败。 |
+| **6** | 原厂返回写入成功，但按目标 NEF 路径检查时未确认文件存在 | 返回值与存在性检查不一致。必须核查两卡；部分路径仍按成功返回值取消 JPEG，不能保证有替代 JPEG。 |
+| 其他 | 当前正常构建的停止文件调用点不产生这些值 | 检查是否为旧版留下的记录，保留原文件与固件版本信息。 |
 
-**不能用“有没有 `.NE_`”单独确定 status 3 走了哪条路径。** `.NE_` 可能属于此前其他帧；残留或文件缺失也受写入错误影响。必须结合 `shot`、文件名、目录、另一张卡与文件完整性检查。
+### 上一公开版的区别
 
-**1.5 秒不是能强制中断 I/O 的硬截止时间。** 原厂路径只在整个 NEF 写入调用返回后计时；后备路径在若干写入返回点检查，而且最后一个 RAW 分块完成后不会因刚超过预算再改为 status 3。阻塞调用可能持续更久，停止文件也不保证相机不会冻结。
+v0.2.0 的后备路径直接写 `.NE_`，完成后再改名为 `.NEF`：原因码 **3** 也可能表示临时文件写到一半超时，**4** 也包括创建／写入／关闭失败，**5** 表示写入与关闭成功但改名失败。当前版本不执行该后备路径，也不产生原因码 5。
+
+卡上的旧 `.NE_` 或停止文件不会随固件更新自动删除。不要仅凭临时文件存在判断它来自哪一版或哪一帧；结合 `shot`、文件名和另一张卡的内容定位。原因码 5 的 `.NE_` 可能含完整内容，如需解码，应在备份介质上复制一份再改扩展名。
+
+**1.5 秒不是能强制中断 I/O 的硬截止时间。** 当前路径在整个 NEF 写入调用返回后计时。阻塞调用可能持续更久，停止文件也不保证相机不会冻结。
 
 “33 MB ÷ 1.5 秒 ≈ 22 MB/s”只能作数量级参考，不是卡速诊断或最低速度认证。实际文件大小、调用开销、瞬时停顿和所走路径都会影响计时。卡空闲不足、文件系统／介质错误、接触问题或瞬时写入停顿是排查方向，不是原因码已经证明的结论；NEF 登记失败也可能来自锁或数据库等条件，不能直接等同于卡满。
 
@@ -85,7 +96,7 @@ PowerShell 将这些字段显示在同一行。
 
 1. 停止继续连拍，等待写入结束。按正常流程关机、取卡；不要为了“无需重启”而在写入中拔卡。
 2. 备份可读素材及停止文件，列出两张卡中的 `.NE_` 和相关 NEF／JPEG。按 `shot` 找到对应曝光及前后帧，确认最终 NEF 是否存在、能否完整解码；看见缩略图不等于 RAW 已完整解码。
-3. 先处理明显的空间或介质问题。近满卡保护在 v0.2.0 仍未修复；不要仅凭剩余张数或卡的标称速度判断已经安全。
+3. 先处理明显的空间或介质问题。实际准入和空间预留仍按 JPEG 计划，不要仅凭剩余张数或卡的标称速度判断容量。
 4. 准备重试时，在电脑上**只删除已备份的 `Z8PRESTP.BIN`**；`.NE_` 和相关素材保留。如果两张卡都有停止文件，应分别核查，不要只清一张便推断两卡已恢复。
 5. 安全弹出存储卡，再按所需 RAW 设置拍一个短组，等待写完并检查文件。代码没有要求必须重启才能复位的内存锁存状态；删除文件后，后续符合条件的新帧会重新尝试 NEF，**不保证下一帧一定成功，也不会补回此前已退成 JPEG 的 RAW**。再次出现停止文件时保留新记录，停止反复清除重试。
 
@@ -103,9 +114,9 @@ PowerShell 将这些字段显示在同一行。
 
 ## 核查依据
 
-本文核对的是 [v0.2.0 固件补丁源码](https://github.com/XinmiaoZhao/NikonFirmwarePatch/blob/v0.2.0/z8precapture/firmware.c)：`stop_file()`／`stopped()` 定义格式与存在性行为，`raw_route()`、`stock_nef()` 定义原因码，`flow()`／`take()`／`dual_second()` 定义回退与双卡缓冲生命周期。默认预算来自 `DEFAULT_BUDGET`。既有公开机器码的限定执行记录也覆盖主卡停止导致两卡 JPEG、副卡停止而主卡保留 NEF 的场景；这不替代触发者的真实故障文件核查。
+当前实现见[预拍源码](../z8precapture/firmware.c)：`stopped()` 检查文件存在，`stop_file()` 写入记录，`stock_nef()` 产生原因码 3／4／6，`flow()` 处理登记拒绝回退。正式构建不包含直接临时 NEF 写入的后备路径。
 
-适用的预编译补丁为 33,117 字节，SHA-256 `d71bffd5f64105eeda35d627c5f628dd4c9da6a976c3ba2de09667ea5e49e224`。本文修订不修改该机器码或已发布附件，不能视为修复了触发原因。未知版本的同名文件应单独核对。
+上一公开版的差异以 [v0.2.0 源码](https://github.com/XinmiaoZhao/NikonFirmwarePatch/blob/v0.2.0/z8precapture/firmware.c)为准。同名停止文件没有固件版本字段，应结合实际安装版本和文件来源判断。
 
 ## English summary
 
@@ -113,6 +124,8 @@ PowerShell 将这些字段显示在同一行。
 
 The writer attempts JPEG fallback, including for RAW-only, but successful JPEG output is not guaranteed. **A stop on the frame's primary card can make both cards fall back to JPEG**, because the shared RAW buffer is released. A stop only on the secondary card can leave the primary NEF intact. This marker does not disable all ordinary RAW shooting or act as a global pre-capture/menu switch. Rebooting does not remove it.
 
-Status **3** means a detected budget overrun (default 1.5 s): the stock path returned success and found the final filename, while the temporary-file fallback can stop with incomplete RAW data. Status **4** covers write/internal-validation failures; **5** is fallback rename failure after successful write/close; **6** is a success return followed by a failed existence check. None identifies card speed, free space or a hardware cause by itself. A `.NE_` file alone does not identify the route or affected frame. Budget checks are cooperative and cannot interrupt a blocked stock I/O call.
+In the current version, status **3** means the stock NEF writer returned success and found the file, but reached the default 1.5-second budget. Status **4** covers write/internal-validation failure; **6** is success followed by a failed existence check. Budget checks cannot interrupt blocked I/O. Database/lock refusal only attempts JPEG fallback and does not create this marker.
 
-Stop shooting, wait for writes, preserve both cards' files, and back up readable data to a separate device with sufficient space. Keep the marker and any `.NE_` files. After investigating the cause, remove only the backed-up marker, safely reinsert the card and test a short burst. New eligible frames may then attempt NEF writing; this does not restore previously lost RAWs or guarantee the next write succeeds. Do not repeatedly clear the marker to continue long bursts. Report the original marker, output, exact firmware identity, both cards' primary/secondary roles, capacity/free space, shooting settings and relevant file lists. Nearly-full-card handling remains unvalidated and unfixed.
+In released **v0.2.0**, a direct temporary-NEF fallback could also produce status 3/4, or **5** when renaming `.NE_` to `.NEF` failed. The current version removes that fallback, but retains the stop-file mechanism. Old markers and temporary files are not automatically deleted.
+
+Stop shooting, wait for writes and preserve both cards' files. Back up readable data and the marker to a separate device. After addressing the cause, remove only the backed-up marker, safely reinsert the card and test a short burst. This permits new NEF attempts; it does not restore earlier RAWs or guarantee success. Preserve new records if the stop recurs. Report the marker, installed firmware, card roles/free space, settings and related file list.

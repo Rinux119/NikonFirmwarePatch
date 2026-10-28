@@ -1,63 +1,36 @@
 # 发布包与独立验证
 
-工具包版本 `v0.2.0` 与固件版本号相互独立。用户仍可选择 ProRes、预拍摄或两者，以及 `NN.NN` 版本号和一个小写字母加一位数字的 tag。默认功能仍为 ProRes；“默认预编译”指选择预拍摄后取得该功能代码的方式。
+当前版本为 **v0.3.0**，上一公开版为 **v0.2.0**。工具包版本与用户选择的固件版本独立。功能变化见[更新日志](../CHANGELOG.md)；公开附件以对应 Release 的源码提交和校验清单为准。
 
-v0.2.0 以已上机的 HN8 为基础，更新 HE／HE★、免 CFG、双卡提交设置及 C15／C30 画质界面；ProRes 配方保持不变。公开版仍使用独立标识并默认关闭诊断尾标。旧 v0.1.0 的 tag、附件和历史验证保留，issue #3 的后续说明见[调查记录](validation.md#issue-3-follow-up-2026-10-20)。
+完整 toolkit ZIP 带全部源码、许可证、公开文档、固定配方及四份自编译补丁：`precapture.bin`、`pixelshift.bin`、`pixelshift-af.bin`、`opengate.bin`，位于 resources。**不分发原厂或修改后的完整固件、实拍原片、运行库、编译器。** 自动 Source code 归档和 Git 克隆不带二进制，需显式源码模式或同一版本完整 toolkit。默认预编译模式不调用 Clang，也不静默下载或编译。ProRes 指令由 Python 生成并匹配固定配方。
 
-**已知风险：近满卡时的 NEF 空间保护尚未验证或修复。** 剩余张数及空间预留仍按 HSFC JPEG 计划估算，可能有空间写 JPEG，却不足以写完 NEF。使用空闲空间充足的卡，双卡分别确认余量；不要把剩余张数当作 RAW 容量保证。完整说明见[使用限制](raw-precapture.md#已知风险存储卡接近写满)。
+## 构建和核验
 
+输入必须为官方 C3.11，99,051,117 B，SHA-256 `d67413c2ede6b9ce8887175f20700bd9fbad2a973a4820968c45503d15d80d96`。
 
-2026-10-21 实拍状态更新：公开组合包 `04.04.p0` 的 102 个 NEF、双卡对应、无诊断尾标及两段 HQ／Proxy 视频和音频检查通过，见[实拍文件验证](validation.md#public-0404p0-camera-files-2026-10-21)。本次只更新验证文档；已发布 v0.2.0 的 tag、ZIP、预编译代码和校验清单保持原样。ZIP 内文档是发布时快照，最新实拍状态以仓库文档为准。
+`resources/compiled.json` 绑定四份代码的长度、哈希、符号地址、编译参数、编译器和源文件哈希；`resources/combinations.json` 为 15 种组合的修改窗口目录。旧 profile/precapture JSON 保留为历史参考，不是当前构建配方。`tools/review_recipes.py` 是维护者的显式配方导出器；不能以重新生成配方替代对改动的独立审核。
 
-**2026-10-23 停止文件说明：** 发现 `Z8PRESTP.BIN` 或 RAW 意外退成 JPEG 时，先停止拍摄并保留两卡文件。主卡停止可能影响副卡 NEF；空文件也可能生效。读取方法、原因码边界及恢复步骤见[停止文件指南](stop-file.md)。这是文档澄清，不是故障修复；既有 v0.2.0 tag、ZIP、机器码和校验清单不变，新增指南以仓库最新版为准。
+`verify.py` 不导入构建器、打包器或编码实现，也不拿输出自己的 manifest 作正确答案。它独立解封装、检查原始输入、全部声明窗口和未改字节、其他模块、版本指令／字符串／目录名以及 CRC／摘要。传入 `--features --version --tag` 才能核对用户原本要求的选项；省略时只检测实际功能和身份一致性。版本不要求递增：Z8 支持降级及同版本重刷，不同组合应使用不同身份。
 
-## 下载和使用
+manifest 记录源文件哈希和来源：toolkit 构建绑定 `release-manifest.json` 及源提交；Git checkout 在 git 可用时记录提交与是否干净。完整固件哈希只识别该次具体组合与身份，不代替字节审核，也不扩大实机范围。
 
-普通用户下载 [Release 的完整 toolkit ZIP](https://github.com/XinmiaoZhao/NikonFirmwarePatch/releases/tag/v0.2.0)，在独立目录解压，按 [README](../README.md)安装 Python 依赖。工具包包含全部工具源码、许可证、验证配方和 `resources/precapture.bin`；不包含编译器、Python 运行库、官方完整固件或修改后的完整固件。
+## 发布者复现
 
-GitHub 自动生成的 Source code 归档和 Git 克隆不包含机器码。源码用户可显式使用 `--code-source source --compiler clang`，或者从**同一版本**完整工具包取得机器码，放在对应源码的 `resources/precapture.bin`。不要混用不同版本的代码和配方；加载时始终检查固定长度及哈希。
-
-Release 的 `SHA256SUMS.txt` 提供 ZIP 的校验值。macOS 可运行 `shasum -a 256 -c SHA256SUMS.txt`，Linux 可运行 `sha256sum -c SHA256SUMS.txt`；Windows PowerShell 可用 `Get-FileHash .\NikonFirmwarePatch-v0.2.0-toolkit.zip -Algorithm SHA256` 与清单比较。校验信息应从可信的项目发布页面取得；同一不可信来源提供的文件和哈希不能证明来源真实。
-
-默认预编译构建不运行 Clang，也不联网下载补丁。缺失或损坏的机器码会报错，并在写输出前停止；不会自动改为源码编译。源码方式仍要求生成已审阅的机器码及入口地址，不提供放宽检查的选项。ProRes 修改继续由 Python 生成并逐块匹配固定配方。
-
-## 如何验证可自定义的固件
-
-1. 构建器和独立验证器分别检查官方输入 SHA-256：`d67413c2ede6b9ce8887175f20700bd9fbad2a973a4820968c45503d15d80d96`，文件大小为 99,051,117 字节。
-2. 对所选功能，根据公开配方核对各修改位置的原字节和新字节哈希。组合包只允许已声明的共享装载修改。
-3. 验证版本指令、内部字符串、尾部标识和模块名，并检查版本递增。构建时将用户要求的版本及 tag 传给独立验证器，不能只证明输出“自洽”。
-4. 独立解开输出封装，重算模块 CRC、整包 CRC 和封装摘要；检查修改范围外的所有字节及其他模块不变。
-5. 写入后读回本地输出并确认其哈希，再生成 manifest。整包哈希标识这次产物，不能代替前面的正确性核验。
-
-例如，对自定义版本 `17.42.x7` 的组合包：
+先提交源码，再在干净的同一提交上生成。v0.3.0 的生成与核验命令：
 
 ```sh
-python patch.py "/path/to/Z_8_0311.bin" --features prores precapture --version 17.42 --tag x7 --output build/custom
-python verify.py "/path/to/Z_8_0311.bin" "build/custom/Z_8_1742.bin" --features prores precapture --version 17.42 --tag x7
+python tools/build_release.py --tag v0.3.0 --compiler clang --output /path/to/new-assets
+python tools/check_release.py /path/to/new-assets/NikonFirmwarePatch-v0.3.0-toolkit.zip --commit COMMIT_SHA
+python tests/validate_distribution.py --archive /path/to/new-assets/NikonFirmwarePatch-v0.3.0-toolkit.zip --archive-only --report /path/to/archive-report.json
+python tests/validate_distribution.py --stock /path/to/Z_8_0311.bin --report /path/to/loader-report.json
+python tests/validate_combinations.py --stock /path/to/Z_8_0311.bin --report /path/to/combinations-report.json
+python tools/check_repository.py --all
 ```
 
-`verify.py` 不导入构建器、编码器或打包器，不以候选固件自己的 manifest 作为“正确答案”。它读取发布的配方，直接检查输入和输出。单独运行时若省略选项，会检测功能并检查版本一致性，但不声称检查了用户原本想选的功能或版本。
+发布构建器只读取明确允许的已提交源码，自编译四份代码并逐项匹配记录；不读取完整固件。ZIP 使用固定时间和文件模式，含所有成员哈希与源提交。独立检查器核对精确成员清单、普通文件类型、总大小、源文件字节、代码长度及哈希和编译来源。多出固件、重复成员、缺失／损坏文件、错误提交均拒绝。
 
-固定整包参考哈希仅覆盖固定的输入、功能、版本和 tag。其他自定义组合通过上述规则验证，无需公布每一种可能的整包哈希，更无需分发完整固件。验证通过表示符合已审阅构建规则，不扩大真实上机测试的范围。当前只在 macOS 完成完整固件构建回归，不能据此宣称 Windows／Linux 已经过相同实测。
+`SHA256SUMS.txt` 是 ZIP 校验清单。macOS 用 `shasum -a 256 -c SHA256SUMS.txt`，Linux 用 `sha256sum -c SHA256SUMS.txt`；Windows 可用 `Get-FileHash`。清单应从可信发布来源取得。先完成组合实机验收，再由维护者推送和发布；上传后下载读回。版本附件保持不可变，修正另建版本。机器码和 ZIP 保持 Git 忽略，不能强制纳入。
 
-## 发布者与开发者复现
+当前功能与限制见[已知问题](known-issues.md)，验证结果见[当前版本验证](validation.md)，上一公开版见 [v0.2.0](validation-v0.2.0.md)。
 
-源码编译使用 `resources/precapture.json` 记录的编译参数及入口地址。当前机器码为 33,117 字节，SHA-256 为 `d71bffd5f64105eeda35d627c5f628dd4c9da6a976c3ba2de09667ea5e49e224`。公开配方为 `z8-c311-precapture-v4`，包含 37 个修改窗口；新钩子和界面依赖回调也受独立验证器检查。
-
-完成并提交源码后，在干净的对应提交上生成工具包：
-
-```sh
-python tools/build_release.py --tag v0.2.0 --compiler clang --output /path/to/new-release-assets
-python tools/check_release.py /path/to/new-release-assets/NikonFirmwarePatch-v0.2.0-toolkit.zip --commit COMMIT_SHA
-python tests/validate_distribution.py --archive /path/to/new-release-assets/NikonFirmwarePatch-v0.2.0-toolkit.zip --archive-only --report /path/to/new-archive-report.json
-```
-
-发布构建器要求记录中的编译器版本，并再次核对机器码哈希。它只读取明确允许的、已提交源码及自编译代码，不读取任何完整固件。ZIP 包含对应提交的完整源码、构建和验证脚本、许可证，以及带文件哈希与源码提交的 `release-manifest.json`。生成时使用固定时间和文件模式。
-
-独立包检查器检查精确成员清单、文件类型、大小、源码字节、机器码哈希和 manifest。多出完整固件路径、缺文件、重复成员、损坏内容或不匹配的来源提交都会被拒绝。检查 Git 内容仍使用原有 `tools/check_repository.py`；机器码和 ZIP 保持 Git 忽略，只作为 Release 附件发布，不能用强制纳入绕过仓库规则。
-
-发布前运行功能回归和源码／预编译等价性测试，检查 Release 归档；上传后下载附件再核对。正式发布的资产与源码 tag 一同保留，有修正时创建新版本。源码、编译材料和许可证随同补丁提供；Nikon 固件的许可不因此改变。
-
-## 致谢
-
-感谢 [@aoyukkk（傲宇）](https://github.com/aoyukkk)、[@South-Bridge（琴岛唯一指定哥布林）](https://github.com/South-Bridge)和“追晚霞的流浪汉”协助开发、开展实机测试并反馈问题。
+发布前从最终审阅的干净提交生成工具包与校验清单，不混用不同提交的源码、文档和附件。下次版本发布不会改写 v0.2.0 的 tag 或附件。贡献者与基础代码来源见 [NOTICE](../NOTICE.md#contributor-acknowledgements)。

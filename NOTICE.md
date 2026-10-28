@@ -8,11 +8,21 @@ The original tool source and the precompiled patch built from it are licensed un
 
 - The Nikon package XOR indexing format was studied with reference to [Nikon Hacker's Package.cs](https://github.com/simeonpilgrim/nikon-firmware-tools/blob/main/Nikon-Patch/LocalUI/Package.cs). This repository includes neither that C# source nor its lookup tables. The implementation recovers equivalent parameters from the user-supplied package.
 - [Capstone 5.0.7](https://github.com/capstone-engine/capstone/tree/5.0.7) is installed separately to inspect generated ARM64 instructions. Its code and runtime are not bundled here; its license is available in [LICENSE.TXT](https://github.com/capstone-engine/capstone/blob/5.0.7/LICENSE.TXT).
-- [Clang/LLVM](https://clang.llvm.org/) is an optional external dependency for explicit pre-capture source builds and release preparation. The default Release toolkit uses the reviewed precompiled patch. No compiler or runtime is bundled.
+- [Clang/LLVM](https://clang.llvm.org/) is an optional external dependency for explicit native-patch source builds and release preparation. The default Release toolkit uses the reviewed precompiled patch. No compiler or runtime is bundled.
 
-The compatibility profile contains hashes and layout parameters, not firmware contents. The Release toolkit includes only the pre-capture code and constants compiled from the corresponding published C source, plus the complete tool source, build scripts and license. No Nikon input image or complete patched output is included. Other patch instructions are generated from source; menu structures and text are read from the user's input. The release manifest binds the source commit, compiler recipe and individual files.
+The compatibility profile contains hashes and layout parameters, not firmware contents. The Release toolkit includes the four patch units (pre-capture, pixel-shift main/AF and open-gate) compiled from the corresponding published C/assembly source, plus the complete tool source, build scripts and license. No Nikon input image or complete patched output is included. Other patch instructions are generated from source; menu structures and text are read from the user's input. The release manifest binds the source commit, compiler recipe and individual files.
 
 The screenshots document the firmware interface running in an emulator. The tool's source-code license does not relicense the depicted firmware interface.
+
+## Contributor acknowledgements
+
+We thank the following contributors, **in no particular order**:
+
+- [@Mei-MingLe (日月)](https://github.com/Mei-MingLe) for research ideas and analysis.
+- [@heavensabove (pai)](https://github.com/heavensabove) for the foundational pixel-shift merge work and base code.
+- [@y-g-jiang (Jiang Yaogeng)](https://github.com/y-g-jiang) for research ideas and suggestions, and for technical discussions that helped refine the approach.
+- [@ShiSheng233 (锂化溴)](https://github.com/ShiSheng233) for open-gate ideas and the implementation framework, and for sharing the related reference implementation.
+- [@aoyukkk (傲宇)](https://github.com/aoyukkk), [@South-Bridge (琴岛唯一指定哥布林)](https://github.com/South-Bridge), and “追晚霞的流浪汉” for development assistance, camera testing and feedback.
 
 ## Emulator acknowledgements
 

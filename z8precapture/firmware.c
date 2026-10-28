@@ -1,12 +1,6 @@
-/* Experimental C15/C30 HE / HE-star RAW capture, based on the tested HN8 implementation.
- * The ordinary Image quality menu controls historical and current frames, with
- * QUAL/f2 and the live-view / i-menu quality display following that selection.
- * No card configuration is read. RAW recording selects HE or HE-star; dual-card
- * role and primary slot are captured when the frame is submitted. Stock writers,
- * per-card headers and NEF previews are retained. See docs/raw-precapture.md.
- * Diagnostic footers are disabled in the public recipe; a test-only build can
- * enable them to compare every recorded field with the hardware-tested baseline.
- */
+/* Menu-controlled RAW pre-capture; HN9 space fallback, HN10 remaining-count fixes, HN11 JPEG grade in the count.
+ * HN12: the NEF's MakerNote 0x0044 (JPGCompression) is 0, as in a camera NEF.
+ * Public adapter: no card configuration, diagnostic footer off by default. */
 typedef unsigned char u8;
 typedef unsigned short u16;
 typedef unsigned int u32;
@@ -105,7 +99,7 @@ typedef long s64;
 #define ENT_MAX 160u
 #define SEG_MAX 27u                /* capacity of the J+0x68.. segment table */
 #define CHUNK 0x100000u
-#define DEFAULT_BUDGET 1500000u    /* per-NEF write budget in microseconds */
+#define DEFAULT_BUDGET 1500000u    /* about 3x the 18 MB write at the 39 MB/s seen in HS2 C */
 #define FRESH_US 120000000ul
 #define F_ENABLE 1u
 #define F_C30 2u
@@ -121,7 +115,7 @@ typedef long s64;
 #define SPLIT_MARK 0x314c5053u     /* "SPL1": record A_SPLIT, HN7: the primary card's files are written, E kept for the secondary */
 #define SUBMIT_MARK 0x53000000u    /* "S" in A_SUBMIT bits 24..31: the roles below were stored at submit */
 #define PVJ_MARK 0x314a5650u       /* "PVJ1": aux +0xb8, written by hook J after the preview encode */
-#define AUX_MAGIC 0x41455250u      /* "PREA" */
+#define AUX_MAGIC 0x41344e48u      /* "HN4A" */
 #define Q_MARKED 1u
 #define Q_RETAINED 2u
 #define K_HISTORY 1u
@@ -170,12 +164,12 @@ typedef long s64;
 #define A_CRC 0xfcu
 #define REC_BYTES 256u
 
-static const u8 qual_magic[16] = "Z8PREQUALv4";
+static const u8 qual_magic[16] = "Z8PREQUALv5";
 #if defined(NEG_T_FILE_IO) || defined(NEG_P2_FILE_IO)
 static const u8 cfg_magic[16] = "Z8PRECFGv3";   /* HN5R card configuration, controls only */
 #endif
 static const u8 foot_magic[16] = "Z8PREFOOTv4";
-static const u8 identity[8] = {'P','R','E','C','A','P','0','4'};
+static const u8 identity[8] = {'P','R','E','C','A','P','0','5'};   /* HN10: 'a' = 10 (8 bytes) */
 /* MakerNote 0x0051 for HE (internal compression 4, budget 2): the original leaf 0x406ea044
  * writes this from M+0x2ac=2; identical in every camera HE NEF examined. */
 static const u8 he51[24] = {0x30,0x31,0x30,0x32,0x30,0x35,0x30,0x31,0,0,13,0,0,0,0,0,6,0,0,0,0,0,0,0};
@@ -193,7 +187,9 @@ static const u8 nikon_ni[18] = {'N','i','k','o','n',0,1,3,0,0,'I','I',0x2a,0,8,0
 static const u8 type_size[13] = {0,1,1,2,4,8,1,1,2,4,8,4,8};
 static const u16 skip0[] = {0x00fe,0x0103,0x014a,0x0201,0x0202,0x0214,0x02bc,0x8769,0x8825,0x9003,0x9216};
 static const u16 skipx[] = {0x9000,0x9101,0x9102,0xa000,0xa001,0xa002,0xa003,0xa005,0x927c};
-static const u16 skipm[] = {0x0004,0x0011,0x0016,0x0035,0x003d,0x0045,0x0051,0x0058,0x00a2};
+static const u16 skipm[] = {0x0004,0x0011,0x0016,0x0035,0x003d,0x0044,0x0045,0x0051,0x0058,0x00a2};
+/* MakerNote 0x0044 of a NEF: the camera's writer 0x406e9b30 gives 1 or 3 only to JPEG kinds, 0 to a NEF. */
+static const u8 jpgc_nef[2] = {0,0};
 static const u32 crc_table[256] = {
 #include "crc32_table.inc"
 };
@@ -365,9 +361,9 @@ static int stock_hsfc_m(u64 m) {
 #ifndef PRECAPTURE_DIAGNOSTIC_FOOTER
 #define PRECAPTURE_DIAGNOSTIC_FOOTER 0
 #endif
-#define MENU_FLAGS (F_ENABLE|F_C30|F_DCF|F_MENU|(PRECAPTURE_DIAGNOSTIC_FOOTER ? F_FOOTER : 0u))
+#define MENU_FLAGS (F_ENABLE|F_C30|F_DCF|F_MENU|(PRECAPTURE_DIAGNOSTIC_FOOTER?F_FOOTER:0u))    /* 0x9b, as M4_C15C30_MENU30 */
 #define MENU_PRE 30u
-#define MENU_LABEL 0u                                  /* public record label; no per-card configuration */
+#define MENU_LABEL 0u                                  /* "NA" (record +0x74, was the configuration label) */
 __attribute__((used)) void precapture_tdec_release(u64 r) {
     u64 e=LOAD64(r+0x748); u8 *q=e?bound(r,e,Q_MARKED):0;
     if(q) {
@@ -610,6 +606,110 @@ __attribute__((used)) u32 precapture_display_mode(u32 v,u64 rec) {
     u32 r=CB_MODE(v,rec);
 #ifndef NEG_NO_REQUEUE
     requeue(R_QKIND,0x211a); requeue(R_QSTAR,0x211c);
+#endif
+    return r;
+}
+
+/* ---------------- HN10: the remaining count with the NEF (hooks X, N); HN11: the JPEG at the ordinary grade ---------------- */
+#define EXPAND ((void (*)(u64,u64))0x4086f8fcul)                  /* (plan, per-card size lists) */
+#define DCF_ITEM ((u32 (*)(u64,u64,u32))0x408700d0ul)              /* DCF settings handler: (&id, &value, 1) -> change flags */
+#define JPEG_EST ((u32 (*)(u64))0x40ea5b8cul)                      /* HN11: the plan builder's JPEG estimate (input block) */
+#define G_PLAN 0xa048419f0ul       /* DCF file plan: count, then 0x28-byte items {files @+0, {type, word, bytes u64} @+8, @+0x18} */
+#define ITEM_BYTES 0x28u
+#define F_TYPE_JPEG 0u             /* plan file types (0x40ea12c0): 0 JPEG, 1 HEIF, 2 NEF, 4 JPEG of a special kind */
+#define F_TYPE_NEF 2u
+#define NEF_EXTRA 0x500000u        /* header, both previews and the footer: 3.64..4.46 MB on 1,154 body NEFs (HN6..HN8) -> 5 MiB */
+#define N_FLAG 0x100u              /* hook N: a flag the stock callback's steps do not test (0x11, 2) */
+#define ID_QTYPE 0x06000604u       /* DS Image quality file type (G_QTYPE) */
+#define ID_QGRADE 0x06000605u      /* DS JPEG grade (G_QGRADE), HN11 */
+#define ID_QSTAR 0x06000606u       /* DS star (G_QSTAR), HN11 */
+#define ID_RAWREC 0x06000608u      /* DS RAW recording (G_RAWREC) */
+/* HN11: the release module's settings cache, from which it builds every plan item (0x40f97724 with w1 = 0 at the six
+ * plan-installing calls and the two other one-item builds; refreshed by 0x40f97b60 / 0x40f974e4 under lock 0xa03bc69c8). */
+#define G_RKIND 0xa03bc6b4cul      /* plan kind, block +0: 0 ordinary, 2 when 0x218c = 1, 3 photo C30..C15 */
+#define G_RAREA 0xa03bc6ab8ul      /* image area (property 0x2124), block +4: 0 = FX */
+#define G_RTHUMB 0xa03bc6ad8ul     /* row of the two thumbnail tables (0x40f2f96c), block +8 */
+#define G_RGRADE 0xa03bc6adcul     /* effective JPEG grade (0x2834 / 0x2119), block +0x10: the HSFC item's in C15/C30 */
+#define G_RSIZE 0xa03bc6ae4ul      /* effective image size (0x2833), block +0x14: 0 = L */
+#define G_RSTAR 0xa03bc6aecul      /* effective star (0x2835 / 0x211c), block +0x1c */
+/* The DCF settings subscription: the stock five ids (0x441871d8), HN10's two and HN11's two. Read only during 0x4086e900. */
+__attribute__((used)) const u32 precapture_dcf_ids[9] = {0x601u, 0x2000688u, 0x6000689u, 0x200172au, 0x2000600u, ID_QTYPE, ID_RAWREC,
+                                                   ID_QGRADE, ID_QSTAR};
+/* NEF bytes of a C15/C30 frame under the current settings (HN5's class rule: HE* only for RAW recording 3). */
+static u32 nef_estimate(void) {
+    return payload_of(LOAD32(G_RAWREC)==3 ? C_HS : C_HE) + NEF_EXTRA;
+}
+/* 0 = the stock plan; else T_RAWJPEG / T_RAW / T_JPEG: the files HN writes per frame (the display's condition, hn_display).
+ * HN11: JPEG too, since P2 gives a JPEG-only frame the ordinary grade and star as well. */
+static u32 count_type(void) {
+#ifdef NEG_COUNT_STOCK                /* negative-control builds only: the stock (JPEG-only) count */
+    return 0;
+#endif
+    u32 t;
+    if(!hn_display()) return 0;
+    t=LOAD32(G_QTYPE);
+#ifdef NEG_JPEG_STOCK                 /* negative-control builds only: HN10 (JPEG-only frames counted by the stock plan) */
+    if(t==3) return 0;
+#endif
+    return t==0 ? T_RAWJPEG : t==1 ? T_RAW : t==3 ? T_JPEG : 0;
+}
+/* HN11. The bytes of the JPEG P2 writes: the stock estimate 0x40ea5b8c (what 0x40ea12c0 puts in the plan) of the cached
+ * inputs with the ordinary grade and star. The estimate is T1[area][star][size][grade] (0xa02a2460c) + the two thumbnail
+ * tables [row][grade] (0xa02a24c0c, 0xa02a24c48) + 248,512; it reads block +0, +4, +8, +0x10, +0x14, +0x1c (+0x2c for
+ * kind 2 only) and writes nothing but its stack. 0 (keep the plan's bytes) unless the JPEG is one P2 re-grades
+ * (stock_hsfc_m: FX L, the HSFC grade fine or normal without star) and the estimate of the cached HSFC grade and star
+ * reproduces the plan's bytes exactly, i.e. the plan was built from these inputs. */
+static u64 jpeg_bytes(u64 stock) {
+#ifdef NEG_JPEG_STOCK
+    return 0;
+#endif
+    u32 blk[16] __attribute__((aligned(16)));
+    u32 kind=LOAD32(G_RKIND),g=LOAD32(G_RGRADE),c=LOAD32(G_RSTAR);
+    if((kind!=0 && kind!=3) || LOAD32(G_RAREA)!=0 || LOAD32(G_RSIZE)!=0 || g>1 || c!=0) return 0;
+    zero((u8 *)blk,sizeof blk);
+    blk[0]=kind; blk[2]=LOAD32(G_RTHUMB); blk[4]=g; blk[7]=c;          /* area (+4) and size (+0x14) are 0 */
+#ifndef NEG_NO_CHECK                  /* negative-control builds only: no check that the plan came from the cache */
+    if((u64)JPEG_EST((u64)blk)!=stock) return 0;
+#else
+    (void)stock;
+#endif
+    blk[4]=LOAD32(G_QGRADE); blk[7]=LOAD32(G_QSTAR);                   /* 0..2, 0..1: hn_display holds */
+    return JPEG_EST((u64)blk);
+}
+/* X. Original: bl 0x4086f8fc(x0 = 0xa048419f0 from 0x4086ebc0, x1 = the caller's list) in 0x408648a8. HN11: only a
+ * one-item plan of one JPEG (type 0): P2 leaves HEIF frames (M+0x2fc) and two-JPEG frames to the stock writer. */
+__attribute__((used)) void precapture_expand(u64 plan,u64 out) {
+    u8 cp[8+ITEM_BYTES] __attribute__((aligned(16)));
+    u32 type=count_type(); u64 j;
+#ifdef NEG_HEIF_TAKEN                 /* negative-control builds only: HN10's test, a HEIF plan taken over too */
+    if(plan!=G_PLAN || !type || LOAD32(plan)!=1 || LOAD32(plan+8)!=1 || LOAD32(plan+0x10)>1) { EXPAND(plan,out); return; }
+#else
+    if(plan!=G_PLAN || !type || LOAD32(plan)!=1 || LOAD32(plan+8)!=1 || LOAD32(plan+0x10)!=F_TYPE_JPEG) { EXPAND(plan,out); return; }
+#endif
+    copy(cp,(const u8 *)plan,8+ITEM_BYTES);
+    u8 *it=cp+8;
+    j=type==T_RAW ? 0 : jpeg_bytes(get64(it+0x10));
+    if(type==T_JPEG && !j) { EXPAND(plan,out); return; }     /* a JPEG P2 does not re-grade: the stock count */
+    if(type==T_RAW) {                                  /* {NEF}: the JPEG member is cancelled */
+        set32(it+8,F_TYPE_NEF); set32(it+0xc,0); set64(it+0x10,nef_estimate());
+    } else {                                           /* {JPEG} or {JPEG, NEF}, the JPEG at the ordinary grade and star */
+        if(j) set64(it+0x10,j);
+        if(type==T_RAWJPEG) { set32(it,2); set32(it+0x18,F_TYPE_NEF); set32(it+0x1c,0); set64(it+0x20,nef_estimate()); }
+    }
+    EXPAND((u64)cp,out);
+}
+/* The ordinary items whose change in C15/C30 changes the count (HN11: also the grade and the star). */
+__attribute__((unused)) static int recount_item(u32 k) {
+#ifdef NEG_NO_GRADE_RECOUNT           /* negative-control builds only: HN10's two items */
+    return k==ID_QTYPE || k==ID_RAWREC;
+#endif
+    return k==ID_QTYPE || k==ID_RAWREC || k==ID_QGRADE || k==ID_QSTAR;
+}
+/* N. Original: bl 0x408700d0 (x0 = &id, x1 = &value, w2 = 1) in the subscription handler 0x408703b4. */
+__attribute__((used)) u32 precapture_dcf_item(u64 id,u64 value,u32 n) {
+    u32 r=DCF_ITEM(id,value,n);
+#ifndef NEG_NO_RECOUNT                /* negative-control builds only: no recount on an ordinary quality change */
+    if(n==1 && recount_item(LOAD32(id)) && hn_display()) r|=N_FLAG;
 #endif
     return r;
 }
@@ -999,6 +1099,7 @@ static int build(out_t *w,const u8 *h,u32 hl,const u32 *hlen,u64 m,lay_t *L,u32 
     pad2(w); L->mn_at=w->pos; u32 mb=w->pos+10; put(w,nikon2,18);
     n=0; if(!copy_entries(&MN,im,t,&n,skipm,sizeof(skipm)/2)) return 0;
     add(t,&n,0x0004,2,8,quality_raw);
+    add(t,&n,0x0044,3,1,jpgc_nef);
     e=add(t,&n,0x0011,4,1,0); if(!e) return 0; e->slot=P_MNPV;
     add(t,&n,0x003d,3,4,v); add(t,&n,0x0045,3,4,v+8); add(t,&n,0x0051,7,24,m51);
     if(!add(t,&n,0x0058,7,12,v+16)) return 0;
@@ -1026,7 +1127,9 @@ static int build(out_t *w,const u8 *h,u32 hl,const u32 *hlen,u64 m,lay_t *L,u32 
 
 
 /* ---------------- P3' file write ---------------- */
+#ifdef NEG_RAW_ROUTE                 /* negative-control builds only: HN8's fallback */
 static int write_all(int fd,u64 p,u32 n) { u32 c=0; return WRITE(fd,p,n,&c)==0 && c==n; }
+#endif
 static int jpg_name(u32 id,char *fin,char *tmp) {
     u64 fo=DCF_GET(id); if(!fo) return 0;
     u64 nm=DCF_NAME(fo); u32 len=nm?LOAD32(nm+0x20):0; int ok=0;
@@ -1128,8 +1231,10 @@ __attribute__((unused)) static int eligible(u64 J,u32 mode,job_t *jb) {
     flags=nef_flags(q);
     /* HN7: the primary card's entry of a two-card frame (list 0 = entry 1, written first); the record not marked yet */
     if(dual_list(r,q) && LOAD32(r+0x1c)==LOAD32(J) && idx==1 && get32(q+A_SPLIT)==0) dual=1;
-    /* the stock database path handles exactly one group of one file on the primary list */
-    if((flags&F_DCF) && !dual && !(LOAD32(r+0x14)==1 && LOAD32(r+0x18)==1 && LOAD32(r+0x1c)==LOAD32(J) && LOAD32(r+0x38)==0)) return 0;
+    /* the stock database path handles exactly one group of one file on the primary list; HN9: only the stock database
+       path is left (P2 always sets F_DCF), a frame without it stays stock */
+    if(!(flags&F_DCF)) return 0;
+    if(!dual && !(LOAD32(r+0x14)==1 && LOAD32(r+0x18)==1 && LOAD32(r+0x1c)==LOAD32(J) && LOAD32(r+0x38)==0)) return 0;
     /* HN6: the card of the JPEG's file id (bits 29..31: 0 = A:, 1 = B:), the slot the stock registration uses */
     if((LOAD32(J)>>29)>1) return 0;
     jb->r=r; jb->m=m; jb->e=e; jb->J=J; jb->q=q; jb->flags=flags; jb->budget=get32(q+0x68);
@@ -1209,8 +1314,9 @@ static void build_footer(plan_t *p,u32 route) {
     set32(f+0x1fc,crc32(f,0x1fc));
 }
 
-/* HN1 route: raw file calls under a temporary name, then rename. Used without the DCF flag and
- * as the fallback when registration fails. The NEF pairs with its JPEG after the next scan. */
+/* HN1 route: raw file calls under a temporary name, then rename. HN8 used it as the fallback when registration failed;
+ * the NEF then took card space the database had not reserved. HN9: only in the control NEG_RAW_ROUTE. */
+#ifdef NEG_RAW_ROUTE
 __attribute__((noinline)) static void raw_route(plan_t *p) {
     u8 *wk=p->wk; const lay_t *L=&p->L;
     u32 flags=p->flags,budget=p->budget,status=S_DONE,written=0,chunks=0,payload=p->payload_bytes;
@@ -1249,6 +1355,7 @@ __attribute__((noinline)) static void raw_route(plan_t *p) {
     if(status==S_DONE && RENAME(p->tmp,p->fin)!=0) status=S_RENAME_FAIL;
     if(status!=S_DONE) stop_file(p->drive,status,p->shot);
 }
+#endif
 
 /* Add a member of the given DCF type (NEF = 2) to the group keyed by the first file id, exactly as the
  * stock creation does for a RAW+JPEG shot: creation lock held around the member add and the
@@ -1342,15 +1449,12 @@ static void release_e(const job_t *jb) { unbind(jb->q); FREE_E(jb->e); STORE64(j
 /* Everything after the header is built: register, write the JPEG and the NEF, or fall back. */
 __attribute__((noinline)) static u32 flow(plan_t *p,u64 J) {
     u32 st,act=p->dual?dual_action(p->flags,p->role,p->second):((p->flags&F_RAWONLY)?ACT_NEF:ACT_BOTH);
-    if(!(p->flags&F_DCF)) {                                              /* HN1 behaviour */
-        st=ORIG_WRITE(0,p->stock_mode,J); p->st_jpeg=st;
-        if(st==0) raw_route(p);
-        return st;
-    }
     p->t_reg0=now(); p->reg_rc=register_member(p,p->mtype); p->t_reg1=now();
-    if(p->reg_rc!=DB_OK) {                                               /* no stock registration: JPEG, then HN1 route */
+    if(p->reg_rc!=DB_OK) {             /* HN9: no registration (no room on the card, or no lock): the stock JPEG only */
         st=ORIG_WRITE(0,p->stock_mode,J); p->st_jpeg=st;
+#ifdef NEG_RAW_ROUTE                  /* negative-control builds only: HN8's NEF outside the database */
         if(st==0) raw_route(p);
+#endif
     } else if(act==ACT_BOTH) {                                            /* RAW+JPEG: stock order JPEG, NEF */
 #ifdef NEG_ORDER                      /* negative-control builds only: NEF before JPEG */
         p->st_nef=stock_nef(p,0);

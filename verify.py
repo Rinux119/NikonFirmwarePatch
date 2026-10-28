@@ -71,22 +71,21 @@ def verify_pair(original, candidate, features=None, *, expected_version=None, ex
     need(a[:112] == b[:112] and a[128:581844] == b[128:581844] and
          a[82389555:-16] == b[82389555:-16], 'Non-EG module or header changed')
     old, new = a[581844:82389555], b[581844:82389555]
-    profiles = {name: json.loads((HERE / ('resources/profile.json' if name == 'prores' else 'resources/precapture.json')).read_text())
-                for name in ('prores', 'precapture')}
+    order=('prores','precapture','pixelshift','opengate-nraw')
+    recipes=json.loads((HERE/'resources/combinations.json').read_text())
+    need(recipes['schema']==2,'Unsupported recipe schema')
+    profiles=recipes['profiles']
     if features is None:
-        features = []
-        for name, offset in [('prores', 0xeb62ec), ('precapture', 0xe0fe90)]:
-            if old[offset:offset+4] != new[offset:offset+4]:
-                features.append(name)
-    need(features and len(features) == len(set(features)) and set(features) <= set(profiles), 'Invalid feature selection')
-    for name in features:
-        for r in profiles[name]['ranges']:
-            start, end = int(r['start'],16), int(r['end'],16)
-            need(sha(old[start:end]) == r['sha256'], 'Input compatibility guard: ' + r['purpose'])
-    identity = new[0x14EAA90:0x14EAA98]
-    old_identity = old[0x14EAA90:0x14EAA98]
+        features=[]
+        for name,offset in [('prores',0xBBEB88),('precapture',0xE0FE90),('pixelshift',0x479714),('opengate-nraw',0x62E150)]:
+            if old[offset:offset+4]!=new[offset:offset+4]:features.append(name)
+    need(features and len(features)==len(set(features)) and set(features)<=set(order),'Invalid feature selection')
+    features=[f for f in order if f in features]
+    profile=profiles['+'.join(features)]
+    identity=new[0x14EAA90:0x14EAA98]
+    old_identity=old[0x14EAA90:0x14EAA98]
     if expected_version is not None:
-        need(identity == f'{expected_version}.{expected_tag}'.encode(), 'Output identity differs from requested version/tag')
+        need(identity==f'{expected_version}.{expected_tag}'.encode(), 'Output identity differs from requested version/tag')
     spans = []
     for buf, text in [(old, old_identity), (new, identity)]:
         need(re.fullmatch(rb'[0-9]{2}\.[0-9]{2}\.[a-z]\d', text) and buf[-11:-3] == text, 'Internal identity mismatch')
@@ -94,20 +93,15 @@ def verify_pair(original, candidate, features=None, *, expected_version=None, ex
         need((w0 & ~0x1FFFE0,w1 & ~0x1FFFE0,w2 & ~0x1FFFE0) == (0x52800008,0x72A00008,0x52800009), 'Version instruction shape')
         value = struct.pack('<I',((w0>>5)&65535)|(((w1>>5)&65535)<<16)) + struct.pack('<H',(w2>>5)&65535)
         need(value == text[:5] + b'\0', 'Public identity mismatch')
-    need(tuple(map(int,identity[:5].split(b'.'))) > tuple(map(int,old_identity[:5].split(b'.'))), 'Version must increase')
     module = b'eg2070_' + identity[:5].replace(b'.',b'') + identity[6:] + b'.bi'
     need(b[112:128] == module.ljust(16,b'\0'), 'Output directory EG name mismatch')
-    expected = {}
-    for name in ('prores', 'precapture'):
-        if name not in features:
-            continue
-        for e in profiles[name]['patches']:
-            start, size = int(e['offset'],16), e['bytes']
-            allowed = profiles[name]['loader_input_sha256'] if name == 'precapture' and start == 0x1024d8c else [e['old_sha256']]
-            need(sha(old[start:start+size]) in allowed, 'Input patch bytes differ')
-            if start in expected:
-                need(start == 0x1024d8c and size == expected[start]['bytes'] == 8, 'Unapproved feature overlap')
-            expected[start] = e
+    expected={}
+    for index in profile['patches']:
+        e=recipes['patches'][index]
+        start,size=int(e['offset'],16),e['bytes']
+        need(sha(old[start:start+size])==e['old_sha256'],'Input patch bytes differ')
+        need(start not in expected,'Duplicate reviewed patch start')
+        expected[start]=e
     for start, e in expected.items():
         size = e['bytes']
         need(sha(new[start:start+size]) == e['new_sha256'], 'Output differs from reviewed feature patch bytes')
@@ -130,7 +124,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('original',type=Path)
     ap.add_argument('candidate',type=Path)
-    ap.add_argument('--features', nargs='+', choices=['prores','precapture'], help='Expected new features; otherwise detect changed entry hooks')
+    ap.add_argument('--features', nargs='+', choices=['prores','precapture','pixelshift','opengate-nraw'], help='Expected new features; otherwise detect changed entry hooks')
     ap.add_argument('--version', help='Expected output version NN.NN; otherwise check identity consistency only')
     ap.add_argument('--tag', help='Expected output tag; requires --version; default p0 when --version is set')
     a = ap.parse_args()

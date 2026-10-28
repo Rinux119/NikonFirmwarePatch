@@ -1,66 +1,10 @@
-"""Load or compile the pre-capture patch against the same pinned public recipe."""
-import json
-from pathlib import Path
+"""Pre-capture HN11 public adapter: feature windows only; no identity or loader edits."""
 import struct
-import subprocess
-import tempfile
+from z8prores.package import require
+BASE=0x40160000
 
-from z8prores.package import RESOURCES, require, sha
-from .linker import link
-
-HERE = Path(__file__).resolve().parent
-LOADER = 0x1024D8C
-
-
-def prebuilt_code():
-    profile = json.loads((RESOURCES / 'precapture.json').read_text())
-    path = RESOURCES / 'precapture.bin'
-    require(path.is_file(),
-            'Prebuilt pre-capture code is missing. Extract the complete matching GitHub Release toolkit, '
-            'or explicitly use --code-source source with the reviewed compiler. No automatic fallback.')
-    require(path.stat().st_size == profile['code_bytes'], 'Prebuilt pre-capture code has the wrong size')
-    code = path.read_bytes()
-    require(len(code) == profile['code_bytes'] and sha(code) == profile['code_sha256'],
-            'Prebuilt pre-capture code does not match the reviewed SHA-256; no output was written')
-    return code, dict(code_source='prebuilt', profile=profile['id'],
-                     code_sha256=sha(code), code_bytes=len(code))
-
-
-def compatibility(eg):
-    profile = json.loads((RESOURCES / 'precapture.json').read_text())
-    require(len(eg) == profile['payload_bytes'], 'Unsupported EG length')
-    for r in profile['ranges']:
-        a, b = int(r['start'], 16), int(r['end'], 16)
-        require(sha(eg[a:b]) == r['sha256'], 'Incompatible region: ' + r['purpose'])
-    for e in profile['patches']:
-        a, n = int(e['offset'], 16), e['bytes']
-        allowed = profile['loader_input_sha256'] if a == LOADER else [e['old_sha256']]
-        require(sha(eg[a:a+n]) in allowed, 'Pre-capture patch input conflicts at ' + e['offset'])
-    return profile
-
-
-def compile_code(compiler='clang'):
-    profile = json.loads((RESOURCES / 'precapture.json').read_text())
-    for name, expected in profile['source_sha256'].items():
-        require(sha((HERE / name).read_bytes()) == expected, 'Pre-capture source changed: ' + name)
-    with tempfile.TemporaryDirectory(prefix='z8-precapture-compile-') as folder:
-        obj = Path(folder) / 'patch.o'
-        command = [compiler, *profile['compiler_flags'], '-c', str(HERE / 'firmware.c'), '-o', str(obj)]
-        run = subprocess.run(command, capture_output=True, text=True)
-        require(run.returncode == 0, 'AArch64 compilation failed: ' + run.stderr[-4000:])
-        code, sections, symbols, _ = link(obj.read_bytes())
-    require(len(code) == profile['code_bytes'] and sha(code) == profile['code_sha256'],
-            'Compiler output differs from the reviewed recipe. Tested compiler: ' + profile['compiler'] +
-            '. No firmware output was written; use a matching toolchain.')
-    for name, address in profile['entries'].items():
-        require(symbols[name]['va'] == address, 'Compiled entry address differs: ' + name)
-    return code, dict(code_source='source', compiler=subprocess.check_output([compiler, '--version'], text=True).splitlines()[0],
-                     code_sha256=sha(code), code_bytes=len(code), sections=sections)
-
-
-def edits(code):
-    profile = json.loads((RESOURCES / 'precapture.json').read_text())
-    entries = {k: int(v, 16) for k, v in profile['entries'].items()}
+def edits(code, symbols):
+    entries = {k: int(v['va'], 16) for k, v in symbols.items()}
 
     def branch(at, to, tail=False):
         d = to-at
@@ -82,8 +26,7 @@ def edits(code):
         0xd4ef10: bl(0x40eaef10, entries['precapture_main_step']),
         0x4d2ffc0: struct.pack('<I', 0x1082600),
         0x4d2ffcc: struct.pack('<I', 0x1082600),
-        0x800000: code,
-        LOADER: bytes.fromhex('080080d2e812a8f2'),
+        0x890000: code,
     }
     for at, entry in (
         (0x40e99798, 'precapture_tenc_config'),
@@ -109,12 +52,12 @@ def edits(code):
     for index, entry in callbacks.items():
         at = 0x4b13000 + 0xa0295c558 + 0x68 * index + 0x30 - 0xa02808000
         values[at] = struct.pack('<Q', entries[entry])
-    require(set(values) == {int(row['offset'], 16) for row in profile['patches']},
-            'Generated pre-capture windows differ from the reviewed recipe')
-    result = []
-    for row in profile['patches']:
-        at = int(row['offset'], 16)
-        raw = values[at]
-        require(len(raw) == row['bytes'] and sha(raw) == row['new_sha256'], 'Generated pre-capture edit differs')
-        result.append(dict(offset=at, new=raw, purpose=row['purpose']))
-    return result
+    values[0x704938] = bl(0x40864938,entries['precapture_expand'])
+    values[0x7103E4] = bl(0x408703E4,entries['precapture_dcf_item'])
+    ids=entries['precapture_dcf_ids']
+    require(0x409F0000<=ids<0x40A00000 and ids%4==0,'Pre-capture subscription table')
+    require(code[ids-0x409F0000:ids-0x409F0000+36]==struct.pack('<9I',0x601,0x2000688,0x6000689,0x200172A,0x2000600,0x6000604,0x6000608,0x6000605,0x6000606),'Pre-capture subscription contents')
+    values[0x70E908]=struct.pack('<I',0xD2800002|((ids&65535)<<5))
+    values[0x70E918]=struct.pack('<I',0xF2A00002|((ids>>16)<<5))
+    values[0x70E94C]=struct.pack('<I',0x52800003|(9<<5))
+    return [dict(offset=at,new=raw,purpose='pre-capture code' if at==0x890000 else 'pre-capture hook/data '+hex(at)) for at,raw in sorted(values.items())]

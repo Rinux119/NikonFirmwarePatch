@@ -32,13 +32,13 @@ NRAW_CALLBACKS = (0x4056C8F8, 0x4056C954, 0x403B2210, 0x4056C958, 0x4056C960)
 NRAW_OK = 0x4056C964
 # ---- new material in the text segment's zero gap 75f8f0..aa0000 --------------------------------
 GAP = (0x75F8F0, 0xAA0000)
-CODE_AT, GUI_AT, TEXT_AT, TABLES_AT = 0x75F900, 0x760000, 0x764000, 0x780000
+CODE_AT, GUI_AT, TEXT_AT, TABLES_AT = 0x8A0000, 0x8A1000, 0x8A4000, 0x780000
 LOADER_END_SITE, LOADER_END = 0x1024D8C, 0x408BF8F0   # mov x8,#0xf8f0 ; movk x8,#0x408b,lsl#16
 SECTION_VA, SECTION_ROOM = 0x40200000, 0xA00000       # RAM room the loader maps for this section
 ID_DUMMY = STRINGS                                   # keeps the end of the last stock string
-ID_LABEL = STRINGS + 1                               # "Video quality (ProRes)"
-ID_OPTION0 = STRINGS + 2                             # four options
-ID_FILETYPE = STRINGS + 6                            # "ProRes 422 10-bit (MOV)"
+ID_LABEL = 3147                               # "Video quality (ProRes)"
+ID_OPTION0 = 3148                             # four options
+ID_FILETYPE = 3152                            # "ProRes 422 10-bit (MOV)"
 NEW_IDS = 7                                          # dummy + label + four options + file type
 STOCK_FILETYPE_ID = 0x707                            # "ProRes 422 HQ 10-bit (MOV)"
 FILETYPE_ROWS = (0x3AA6AD8, 0x3AA6B04)               # the two option rows of the Video file type page
@@ -86,44 +86,21 @@ class Image:
         return struct.unpack_from('<Q', self.old, o)[0]
 
 
-def strings(img):
-    """New ids for all 36 languages without moving the stock text."""
-    tables = [img.u64(TABLE_DIR + 8 * k) - BASE for k in range(LANGUAGES)]
-    blobs = [img.u64(BLOB_DIR + 8 * k) - BASE for k in range(LANGUAGES)]
-    text, new_tables, labels, file_types = bytearray(), [], [], []
+def strings(img, context):
+    tables = [img.u64(TABLE_DIR+8*k)-BASE for k in range(LANGUAGES)]
+    blobs = [img.u64(BLOB_DIR+8*k)-BASE for k in range(LANGUAGES)]
+    translations=[]
     for k in range(LANGUAGES):
-        table = list(struct.unpack_from(f'<{STRINGS + 1}i', img.old, tables[k]))
-        a, b = table[0x8A6], table[0x8A7]
-        stock = img.old[blobs[k] + a:blobs[k] + b].decode('utf-16le')       # "Video quality (N-RAW)"
-        label = stock.replace('RAW-N', 'ProRes') if 'RAW-N' in stock else stock.replace('N-RAW', 'ProRes')
-        if label == stock:
-            raise ValueError(f'language {k}: no N-RAW in the stock label')
-        labels.append(label)
-        a, b = table[STOCK_FILETYPE_ID], table[STOCK_FILETYPE_ID + 1]
-        stock = img.old[blobs[k] + a:blobs[k] + b].decode('utf-16le')       # "ProRes 422 HQ 10-bit (MOV)"
-        file_type, count = re.subn(r'(ProRes 422) ?HQ', r'\1', stock)
-        if count != 1 or 'HQ' in file_type:
-            raise ValueError(f'language {k}: unexpected stock file type label {stock!r}')
-        file_types.append(file_type)
-        for item in (label, *OPTIONS, file_type):
-            table.append(va(TEXT_AT) + len(text) - va(blobs[k]))            # start of this id
-            text += item.encode('utf-16le')
-        table.append(va(TEXT_AT) + len(text) - va(blobs[k]))                # end of the last new id
-        if len(table) != STRINGS + NEW_IDS + 1:
-            raise AssertionError
-        new_tables.append(struct.pack(f'<{len(table)}i', *table))
-    size = len(new_tables[0])
-    if TEXT_AT + len(text) > TABLES_AT:
-        raise ValueError('text area too small')
-    img.put(TEXT_AT, text, 'new strings (UTF-16LE), per language: label, four options, file type label',
-            expect_zero=True)
-    for k in range(LANGUAGES):
-        at = TABLES_AT + size * k
-        img.put(at, new_tables[k], f'offset table of language {k}, {STRINGS + NEW_IDS + 1} entries', expect_zero=True)
-        img.put(TABLE_DIR + 8 * k, struct.pack('<Q', va(at)), f'table directory entry {k}',
-                expect=struct.pack('<Q', va(tables[k])))
-    return dict(label_id=ID_LABEL, option_ids=[ID_OPTION0 + i for i in range(4)], dummy_id=ID_DUMMY,
-                file_type_id=ID_FILETYPE, table_bytes=size, labels=labels, file_type_labels=file_types)
+        offsets=struct.unpack_from('<3137i',img.old,tables[k])
+        def stock(i):return img.old[blobs[k]+offsets[i]:blobs[k]+offsets[i+1]].decode('utf-16le')
+        value=stock(0x8A6)
+        label=value.replace('RAW-N','ProRes') if 'RAW-N' in value else value.replace('N-RAW','ProRes')
+        if label==value:raise ValueError('Missing stock N-RAW label')
+        filetype,count=re.subn(r'(ProRes 422) ?HQ',r'\1',stock(STOCK_FILETYPE_ID))
+        if count!=1 or 'HQ' in filetype:raise ValueError('Unexpected ProRes file type label')
+        translations.append([label,*OPTIONS,filetype])
+    ids=context.add('prores',translations)
+    return dict(label_id=ids[0],option_ids=ids[1:5],file_type_id=ids[5])
 
 
 def file_type_label(img, ids):
@@ -331,21 +308,20 @@ def loader(img):
                 copied_bytes=hex(end - SECTION_VA), room=hex(SECTION_ROOM))
 
 
-def build_main(data):
+def build_main(data, strings_context):
     """Return Image edits and review metadata; input is immutable MAIN without CRC."""
     cs = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
     img = Image(data)
     if any(data[GAP[0]:GAP[1]]):
         raise ValueError('Required text gap is occupied (already patched or incompatible)')
-    ids = strings(img)
+    ids = strings(img, strings_context)
     ids['file_type_sites'] = file_type_label(img, ids)
     blk, code_bytes, listing = code(cs)
     if CODE_AT + len(code_bytes) > GUI_AT:
         raise ValueError('Code area too small')
     img.put(CODE_AT, code_bytes, 'code: sub-page entry, OK, refresh wrapper, value texts', expect_zero=True)
     where = menu(img, ids, blk)
-    where['loader'] = loader(img)
     from . import back_half
-    back = back_half.apply(img, cs, VALUE_RAM, STASH_RAM, CODE_AT + len(code_bytes), GUI_AT, bank=True)
+    back = back_half.apply(img, cs, VALUE_RAM, STASH_RAM, CODE_AT + len(code_bytes), GUI_AT, bank=False)
     return img, dict(strings=ids, menu=where, back_half=back,
                     code=[dict(va=hex(x), word=w, text=t) for x, w, t in listing])
