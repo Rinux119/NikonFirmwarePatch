@@ -39,4 +39,4 @@ python tools/check_repository.py --all
 
 ## Windows 发布门
 
-[Host checks](https://github.com/XinmiaoZhao/NikonFirmwarePatch/actions/workflows/host-checks.yml) 在 Windows Python 3.12／3.13、Linux 和 macOS 上运行路径回归。发布前以 `toolkit_tag` 和独立核对的 `toolkit_sha256` 手动运行正式附件检查：下载该草稿或已发布工具包，核对源码提交与全部成员，从 Nikon 取得精确哈希的 C 3.11，运行 issue #12 的组合和全选组合，并独立核验生成固件。输入与输出只在 runner 临时目录使用，工作流只保存 JSON 结果。执行记录与结果链接随 Release 提供。
+[Host checks](https://github.com/XinmiaoZhao/NikonFirmwarePatch/actions/workflows/host-checks.yml) 在 Windows Python 3.12／3.13、Linux 和 macOS 上运行路径回归。发布前以 `firmware_smoke=true` 手动运行 Windows 构建：取得哈希固定的公开 v0.3.0 工具包，仅取与修订版相同的四份机器码，配合当前发布源码，从 Nikon 取得精确哈希的 C 3.11，运行 issue #12 的组合和全选组合，并独立核验生成固件。工作流保持只读权限，保存源码、机器码与输出哈希；发布者再与最终工具包逐项比对。输入与输出只在 runner 临时目录使用，只上传 JSON 结果。执行记录与结果链接随 Release 提供。

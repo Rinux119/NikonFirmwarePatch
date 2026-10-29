@@ -6,14 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      toolkit_tag:
-        description: 'Optional draft/published toolkit tag for Windows firmware smoke checks'
-        type: string
-        default: ''
-      toolkit_sha256:
-        description: 'Required expected ZIP SHA-256 when toolkit_tag is set'
-        type: string
-        default: ''
+      firmware_smoke:
+        description: 'Run Windows prebuilt firmware checks with hash-pinned public inputs'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -44,7 +40,7 @@ jobs:
       - run: python -B tests/test_compiled_paths.py
 
   windows-toolkit:
-    if: github.event_name == 'workflow_dispatch' && inputs.toolkit_tag != ''
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.firmware_smoke
     needs: paths
     strategy:
       fail-fast: false
@@ -52,9 +48,6 @@ jobs:
         python: ['3.12', '3.13']
     runs-on: windows-latest
     timeout-minutes: 20
-    env:
-      TOOLKIT_TAG: ${{ inputs.toolkit_tag }}
-      TOOLKIT_SHA256: ${{ inputs.toolkit_sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -62,57 +55,44 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
-      - name: Validate requested toolkit identity
+      - name: Verify public prebuilt units and obtain official input
         shell: python
         run: |
-          import os, re, sys
-          sys.path.insert(0, os.environ['GITHUB_WORKSPACE'])
-          from tools.check_release import TAG
-          if not re.fullmatch(TAG, os.environ['TOOLKIT_TAG']):
-              raise ValueError('Invalid toolkit tag')
-          if not re.fullmatch('[0-9a-f]{64}', os.environ['TOOLKIT_SHA256']):
-              raise ValueError('Expected toolkit SHA-256 is required')
-      - name: Download exact toolkit asset
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: python
-        run: |
-          import json, os, subprocess
+          import hashlib, io, json, os, sys, urllib.request, zipfile
           from pathlib import Path
-          repo = os.environ['GITHUB_REPOSITORY']
-          tag = os.environ['TOOLKIT_TAG']
-          releases = json.loads(subprocess.check_output(
-              ['gh', 'api', 'repos/' + repo + '/releases?per_page=100'], text=True, encoding='utf-8'))
-          matches = [release for release in releases if release['tag_name'] == tag]
-          if len(matches) != 1:
-              raise ValueError('Expected one matching draft or published release')
-          name = 'NikonFirmwarePatch-' + tag + '-toolkit.zip'
-          assets = [asset for asset in matches[0]['assets'] if asset['name'] == name]
-          if len(assets) != 1:
-              raise ValueError('Expected one toolkit asset')
+          root = Path(os.environ['GITHUB_WORKSPACE'])
+          sys.path.insert(0, str(root))
+          from tools.check_release import SOURCE_FILES
           work = Path(os.environ['RUNNER_TEMP']) / 'nikon-smoke'
           work.mkdir(exist_ok=False)
-          with (work / name).open('xb') as output:
-              subprocess.run(['gh', 'api', 'repos/' + repo + '/releases/assets/' + str(assets[0]['id']),
-                              '-H', 'Accept: application/octet-stream'], stdout=output, check=True)
-      - name: Verify toolkit and obtain hash-pinned official input
-        shell: python
-        run: |
-          import hashlib, json, os, sys, urllib.request, zipfile
-          from pathlib import Path
-          sys.path.insert(0, os.environ['GITHUB_WORKSPACE'])
-          from tools.check_release import check_release
-          work = Path(os.environ['RUNNER_TEMP']) / 'nikon-smoke'
-          tag = os.environ['TOOLKIT_TAG']
-          archive = work / ('NikonFirmwarePatch-' + tag + '-toolkit.zip')
-          if hashlib.sha256(archive.read_bytes()).hexdigest() != os.environ['TOOLKIT_SHA256']:
-              raise ValueError('Toolkit digest mismatch')
-          check_release(archive, os.environ['GITHUB_SHA'])
-          # check_release has already restricted members to the exact safe allowlist.
-          with zipfile.ZipFile(archive) as package:
-              package.extractall(work)
-          toolkit = work / ('NikonFirmwarePatch-' + tag)
-          expected = json.loads((toolkit / 'resources/input.json').read_text(encoding='utf-8'))
+          # r1 changes host code only. Use the unchanged public v0.3.0 machine code,
+          # retaining read-only permissions and never requiring access to a draft.
+          url = 'https://github.com/XinmiaoZhao/NikonFirmwarePatch/releases/download/v0.3.0/NikonFirmwarePatch-v0.3.0-toolkit.zip'
+          expected_zip = '126f05abae535cf0e2844e938920c15acc67d7b144d7bd363dc0af97e6365cad'
+          with urllib.request.urlopen(url, timeout=60) as response:
+              archive_bytes = response.read(8 * 1024 * 1024 + 1)
+          if hashlib.sha256(archive_bytes).hexdigest() != expected_zip:
+              raise ValueError('Public base toolkit digest mismatch')
+          units = json.loads((root / 'resources/compiled.json').read_text(encoding='utf-8'))['units']
+          code_hashes = {}
+          with zipfile.ZipFile(io.BytesIO(archive_bytes)) as package:
+              prefix = 'NikonFirmwarePatch-v0.3.0/'
+              if package.read(prefix + 'resources/compiled.json') != (root / 'resources/compiled.json').read_bytes():
+                  raise ValueError('Machine-code profiles changed; this host-only smoke fixture must be reviewed')
+              for unit in units.values():
+                  name = unit['resource']
+                  raw = package.read(prefix + name)
+                  if len(raw) != unit['bytes'] or hashlib.sha256(raw).hexdigest() != unit['sha256']:
+                      raise ValueError('Unreviewed prebuilt unit: ' + name)
+                  with (root / name).open('xb') as output:
+                      output.write(raw)
+                  code_hashes[name] = hashlib.sha256(raw).hexdigest()
+          inputs = {'source_commit': os.environ['GITHUB_SHA'], 'base_toolkit_sha256': expected_zip,
+                    'source_files_sha256': {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in SOURCE_FILES},
+                    'compiled_units_sha256': code_hashes,
+                    'scope': 'Native Windows checkout and prebuilt bytes; compare every source/code hash with the final release ZIP'}
+          (work / 'host-inputs.json').write_text(json.dumps(inputs, indent=2) + '\n', encoding='utf-8')
+          expected = json.loads((root / 'resources/input.json').read_text(encoding='utf-8'))
           url = 'https://download.nikonimglib.com/archive8/wP5Vr003qbpC07ibhJ666rmRfF47/Z_8_0311.bin'
           received = 0
           digest = hashlib.sha256()
@@ -126,10 +106,10 @@ jobs:
           if received != expected['bytes'] or digest.hexdigest() != expected['sha256']:
               raise ValueError('Official input digest mismatch')
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env:
-              env.write('TOOLKIT_ROOT=' + str(toolkit) + '\n')
+              env.write('TOOLKIT_ROOT=' + str(root) + '\n')
       - name: Install pinned verifier dependency
         run: python -m pip install -r "$env:TOOLKIT_ROOT/requirements.txt"
-      - name: Test extracted toolkit on Windows
+      - name: Test matching source and prebuilt units on Windows
         run: python -B "$env:TOOLKIT_ROOT/tests/test_compiled_paths.py"
       - name: Build reported and all-feature selections without a compiler
         run: python -B "$env:TOOLKIT_ROOT/tests/validate_prebuilt_cli.py" --stock "$env:RUNNER_TEMP/nikon-smoke/Z_8_0311.bin" --report "$env:RUNNER_TEMP/nikon-smoke/report.json"
@@ -138,10 +118,12 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-prebuilt-${{ matrix.python }}
-          path: ${{ runner.temp }}/nikon-smoke/report.json
+          path: |
+            ${{ runner.temp }}/nikon-smoke/report.json
+            ${{ runner.temp }}/nikon-smoke/host-inputs.json
           if-no-files-found: ignore
           retention-days: 14
-      - name: Remove temporary input, toolkit and outputs
+      - name: Remove temporary input and outputs
         if: always()
         run: |
           if (Test-Path "$env:RUNNER_TEMP/nikon-smoke") { Remove-Item -LiteralPath "$env:RUNNER_TEMP/nikon-smoke" -Recurse -Force }
