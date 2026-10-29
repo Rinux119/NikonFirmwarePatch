@@ -14,7 +14,7 @@
 
 ## 简体中文
 
-**当前版本：v0.3.0。** 本工具从官方 **Nikon Z8 C 3.11** 生成用户选择功能的固件。上一公开版为 [v0.2.0](https://github.com/XinmiaoZhao/NikonFirmwarePatch/releases/tag/v0.2.0)，变化见[更新日志](CHANGELOG.md)。
+**当前工具修订：v0.3.0-r1。** 修复 Windows 构建时的源码路径校验错误（[issue #12](https://github.com/XinmiaoZhao/NikonFirmwarePatch/issues/12)），固件功能与 v0.3.0 相同。本工具从官方 **Nikon Z8 C 3.11** 生成用户选择功能的固件。上一工具包为 [v0.3.0](https://github.com/XinmiaoZhao/NikonFirmwarePatch/releases/tag/v0.3.0)，变化见[更新日志](CHANGELOG.md)。
 
 | 选项 | 功能 |
 |---|---|
@@ -27,11 +27,11 @@
 
 **这是实验固件，构建或安装可能造成数据丢失、卡损坏或相机故障。** 离线检查不等于实机安全保证，请勿用于不可替代的工作。无担保及责任条款见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE.md)。
 
-请自行从 [Nikon](https://downloadcenter.nikonimglib.com/en/download/fw/606.html) 取得官方输入并遵守其条款。工具包包含源码及四份自编译补丁，不分发完整 Nikon 固件、实拍原片或编译器；工具不会自动写卡或操作相机。
+请自行从 [Nikon](https://downloadcenter.nikonimglib.com/en/download/fw/606.html) 取得官方输入并遵守其条款。工具包包含源码及四份自编译补丁，不分发完整 Nikon 固件、实拍原片或编译器；工具不会自动写卡或操作相机。旧版官方下载页失效时，可使用 [issue #11 中已核对的 Nikon 下载地址](https://github.com/XinmiaoZhao/NikonFirmwarePatch/issues/11#issuecomment-6493044598)。
 
 ### 构建与核验
 
-从 [v0.3.0 Release](https://github.com/XinmiaoZhao/NikonFirmwarePatch/releases/tag/v0.3.0) 下载完整 [toolkit ZIP](https://github.com/XinmiaoZhao/NikonFirmwarePatch/releases/download/v0.3.0/NikonFirmwarePatch-v0.3.0-toolkit.zip)。Git 克隆及自动源码包只有源码，需要显式加 `--code-source source --compiler clang`；不要混用 v0.2.0 二进制。
+从 [v0.3.0-r1 Release](https://github.com/XinmiaoZhao/NikonFirmwarePatch/releases/tag/v0.3.0-r1) 下载完整 [toolkit ZIP](https://github.com/XinmiaoZhao/NikonFirmwarePatch/releases/download/v0.3.0-r1/NikonFirmwarePatch-v0.3.0-r1-toolkit.zip)。Git 克隆及自动源码包只有源码，需要显式加 `--code-source source --compiler clang`；不要混用 v0.2.0 二进制。
 
 需要 Python 3.10+ 和 `requirements.txt` 中的依赖。默认预编译模式不需要 Clang，不会下载补丁或静默转为编译；缺失或改动的机器码会阻止构建。已核对的源码编译器为 Apple clang 21.0.0（clang-2100.1.1.101）；其他编译器须产生相同的固定字节和入口地址。
 
@@ -54,7 +54,7 @@ python patch.py "/path/to/Z_8_0311.bin" --features opengate-nraw --version 04.07
 python patch.py "/path/to/Z_8_0311.bin" --interactive --version 04.08 --tag p0 --output build/chosen
 ```
 
-Windows 使用 `py -3 -m venv .venv` 创建环境，用 `.\.venv\Scripts\Activate.ps1` 激活，然后运行相同的 Python 命令。完整构建回归在 macOS 上完成。
+Windows 使用 `py -3 -m venv .venv` 创建环境，用 `.\.venv\Scripts\Activate.ps1` 激活，然后运行相同的 Python 命令。全部 15 种组合的构建回归在 macOS 上运行；Windows 路径回归与预编译 CLI 检查见[当前验证](docs/validation.md)。
 
 未指定功能时默认只选 ProRes。版本格式为 `NN.NN`，tag 为小写字母加数字。Z8 支持降级和同版本重刷，不要求版本高于机身。工具不能读取机身版本或保证安装成功。
 
@@ -72,7 +72,7 @@ Windows 使用 `py -3 -m venv .venv` 创建环境，用 `.\.venv\Scripts\Activat
 
 ## English
 
-**Current version: v0.3.0.** This toolkit builds selected features from official **Nikon Z8 C 3.11**. The previous public release is [v0.2.0](https://github.com/XinmiaoZhao/NikonFirmwarePatch/releases/tag/v0.2.0); see the [changelog](CHANGELOG.md).
+**Current toolkit revision: v0.3.0-r1.** Fixes the Windows source-path verification failure ([issue #12](https://github.com/XinmiaoZhao/NikonFirmwarePatch/issues/12)); firmware features are unchanged from v0.3.0. This toolkit builds selected features from official **Nikon Z8 C 3.11**. The previous toolkit is [v0.3.0](https://github.com/XinmiaoZhao/NikonFirmwarePatch/releases/tag/v0.3.0); see the [changelog](CHANGELOG.md).
 
 | Option | Feature |
 |---|---|
@@ -85,11 +85,11 @@ Choose any nonempty subset: 15 combinations. ProRes and open gate/N-RAW can be b
 
 **Experimental firmware: building or installing can cause data loss, card corruption or camera malfunction.** Offline checks do not guarantee camera safety. Do not use it for irreplaceable work. See the warranty and liability terms in [LICENSE](LICENSE) and [NOTICE](NOTICE.md).
 
-Obtain the official input yourself from [Nikon](https://downloadcenter.nikonimglib.com/en/download/fw/606.html), subject to its terms. The toolkit contains source and four compiled patch units, not complete Nikon firmware, photographs or a compiler. It never writes a card or operates a camera.
+Obtain the official input yourself from [Nikon](https://downloadcenter.nikonimglib.com/en/download/fw/606.html), subject to its terms. The toolkit contains source and four compiled patch units, not complete Nikon firmware, photographs or a compiler. It never writes a card or operates a camera. If the old download page is unavailable, see the [verified Nikon URLs in issue #11](https://github.com/XinmiaoZhao/NikonFirmwarePatch/issues/11#issuecomment-6493044598).
 
 ### Build and verify
 
-Download the complete [toolkit ZIP](https://github.com/XinmiaoZhao/NikonFirmwarePatch/releases/download/v0.3.0/NikonFirmwarePatch-v0.3.0-toolkit.zip) from the [v0.3.0 Release](https://github.com/XinmiaoZhao/NikonFirmwarePatch/releases/tag/v0.3.0). Git clones and automatic source archives contain source only; add `--code-source source --compiler clang`. Do not mix v0.2.0 binaries with this source.
+Download the complete [toolkit ZIP](https://github.com/XinmiaoZhao/NikonFirmwarePatch/releases/download/v0.3.0-r1/NikonFirmwarePatch-v0.3.0-r1-toolkit.zip) from the [v0.3.0-r1 Release](https://github.com/XinmiaoZhao/NikonFirmwarePatch/releases/tag/v0.3.0-r1). Git clones and automatic source archives contain source only; add `--code-source source --compiler clang`. Do not mix v0.2.0 binaries with this source.
 
 Python 3.10+ and the dependencies in `requirements.txt` are required. Default prebuilt mode needs no Clang and performs no downloads or compilation fallback. Missing or altered patch bytes stop the build. The reviewed source compiler is Apple clang 21.0.0 (clang-2100.1.1.101); another compiler must produce the same pinned bytes and entry addresses.
 
@@ -112,7 +112,7 @@ python patch.py "/path/to/Z_8_0311.bin" --features opengate-nraw --version 04.07
 python patch.py "/path/to/Z_8_0311.bin" --interactive --version 04.08 --tag p0 --output build/chosen
 ```
 
-On Windows, create the environment with `py -3 -m venv .venv` and activate `.\.venv\Scripts\Activate.ps1`, then run the same Python commands. Full build regression was performed on macOS.
+On Windows, create the environment with `py -3 -m venv .venv` and activate `.\.venv\Scripts\Activate.ps1`, then run the same Python commands. All 15 build selections are checked on macOS; see [current validation](docs/validation.md) for Windows path regression and prebuilt CLI checks.
 
 The default is ProRes only when no feature selection is supplied. Versions use `NN.NN`; tags use a lowercase letter and digit. Z8 supports downgrade and same-version reinstall, so the version need not exceed the installed one. The toolkit cannot read the camera version or guarantee installation.
 

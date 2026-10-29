@@ -1,6 +1,16 @@
 # 当前版本验证 / Current validation
 
-适用于v0.3.0 四功能版本。上一公开版为 [v0.2.0](validation-v0.2.0.md)，功能变化见[更新日志](../CHANGELOG.md)。[机器可读摘要](validation-summary.json)保留验证项目及证据哈希。
+适用于 v0.3.0 四功能版本及 v0.3.0-r1 主机工具修订。上一公开版为 [v0.2.0](validation-v0.2.0.md)，功能变化见[更新日志](../CHANGELOG.md)。[机器可读摘要](validation-summary.json)保留验证项目及证据哈希。
+
+## r1 主机验证 / Host revision checks
+
+本次修订只统一源码身份键的路径表示；源码仍按原始字节计算 SHA-256。四份补丁机器码与全部组合配方沿用 v0.3.0，同身份、同功能选择应生成相同固件字节。下述原指令、QEMU 与实机记录仍绑定原功能实现，本次不新增设备安全结论。
+
+- `tests/test_compiled_paths.py` 用独立清单、真实文件及 Python 的 Windows 路径语义检验加载器，覆盖四份补丁、两种加载模式，以及改动源码／机器码、缺失／额外文件的拒绝路径。无需固件或编译器。
+- [Host checks](https://github.com/XinmiaoZhao/NikonFirmwarePatch/actions/workflows/host-checks.yml) 在真实 Windows Python 3.12／3.13、Linux 与 macOS 执行路径回归。手动发布门另在 Windows 的正式解压工具包上执行 `prores precapture` 和全选组合，清空 PATH 排除编译器调用，并单独运行 `verify.py`。确切源码与附件的执行记录见 Release 链接。
+- 全部 15 种组合、源码／预编译一致性及分发包负控继续在 macOS 核验。
+
+This host-only revision canonicalizes path keys without normalizing source bytes or relaxing integrity checks. Firmware code and recipes are unchanged. The release gate runs the extracted toolkit on Windows Python 3.12/3.13, builds the reported and all-feature selections without a compiler, and independently verifies both outputs. Cross-platform path tests also cover altered and missing inputs. Native-code, QEMU and camera records below are inherited from the unchanged v0.3.0 implementation.
 
 ## 构建与启动
 

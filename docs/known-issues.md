@@ -2,6 +2,10 @@
 
 适用于基于官方 Nikon Z8 C 3.11 的 v0.3.0 四功能版本。以下列出当前实现中已确认的问题和明确的功能限制；操作方法见各功能指南，验证记录见[当前版本验证](validation.md)。
 
+## Windows 工具包修订
+
+原 v0.3.0 在 Windows 上构建预拍摄、像素位移或开放门时，可能报 `Compiled patch source does not match the reviewed recipe`，而 `--check` 仍通过。v0.3.0-r1 修复了路径分隔符比较。请重新解压完整修订工具包到新目录，使用原厂 C 3.11 输入和一个尚不存在的输出目录；无需修改配方或关闭哈希检查。`--check` 检查输入兼容性，不代表完整构建已验证。详见 [issue #12](https://github.com/XinmiaoZhao/NikonFirmwarePatch/issues/12)。
+
 ## RAW 连拍与预拍摄
 
 - **仅支持 FX/L、C15/C30、HE／HE★。** 选择“无损压缩”时，此路径仍记录 HE。DX RAW、C60/C120 RAW、HLG/HEIF 和副卡独立 JPEG 尺寸计划不受支持。
@@ -38,6 +42,10 @@
 模式选择与各档码率预算见[开放门／N-RAW 指南](opengate-nraw.md)。
 
 ## English
+
+### Windows toolkit revision
+
+The original v0.3.0 can reject pre-capture, pixel-shift or open-gate builds on Windows with `Compiled patch source does not match the reviewed recipe`, even when `--check` passes. v0.3.0-r1 fixes path-separator comparison. Extract the complete revised toolkit into a fresh directory and build from official C 3.11 into a new output directory. Keep the recipes and hash checks intact. `--check` validates input compatibility; it is not a complete build check. See [issue #12](https://github.com/XinmiaoZhao/NikonFirmwarePatch/issues/12).
 
 Applies to the current four-feature version, built from official Nikon Z8 C 3.11.
 

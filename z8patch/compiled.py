@@ -24,7 +24,7 @@ SPECS = {
 
 def source_files(name):
     folder = ROOT/('z8precapture' if name=='precapture' else 'z8opengate/src' if name=='opengate' else 'z8pixelshift/src')
-    return {str(p.relative_to(ROOT)):sha(p.read_bytes()) for p in sorted(folder.iterdir()) if p.suffix in ('.c','.h','.inc','.S')}
+    return {p.relative_to(ROOT).as_posix():sha(p.read_bytes()) for p in sorted(folder.iterdir()) if p.suffix in ('.c','.h','.inc','.S')}
 
 
 def compile_unit(name, compiler='clang'):

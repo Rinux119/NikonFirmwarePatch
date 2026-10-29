@@ -6,6 +6,7 @@ ROOT=Path(__file__).resolve().parents[1]
 # Reviewed explicit allowlist. Original firmware, media, runtimes and arbitrary files have no entry.
 SOURCE_FILES=(
     '.gitattributes',
+    '.github/workflows/host-checks.yml',
     '.githooks/pre-commit',
     '.gitignore',
     'CHANGELOG.md',
@@ -35,6 +36,8 @@ SOURCE_FILES=(
     'resources/input.json',
     'resources/precapture.json',
     'resources/profile.json',
+    'tests/test_compiled_paths.py',
+    'tests/validate_prebuilt_cli.py',
     'tests/validate.py',
     'tests/validate_combinations.py',
     'tests/validate_distribution.py',
@@ -107,7 +110,7 @@ SOURCE_FILES=(
 )
 CODE_FILES=('resources/precapture.bin','resources/pixelshift.bin','resources/pixelshift-af.bin','resources/opengate.bin')
 MANIFEST='release-manifest.json'
-TAG=r'v[0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[1-9][0-9]*)?'
+TAG=r'v[0-9]+\.[0-9]+\.[0-9]+(?:-(?:rc\.[1-9][0-9]*|r[1-9][0-9]*))?'
 def need(ok,message):
     if not ok:raise ValueError(message)
 def digest(data):return hashlib.sha256(data).hexdigest()
